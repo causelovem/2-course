@@ -1,0 +1,2664 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <termios.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
+
+#define STRLEN 256
+#define COMANDLEN 21
+
+
+int countofstr=0,endflag=0,charnum=0,termstr=0,termwid=0,setwrapflag=1,settabwidthflag=8,comandreadflag=1,comandrest=0,
+setnameflag=0,savefileflag=0,exitflag=0;
+char comand_buf[COMANDLEN+1];
+char *comand=NULL,*filename=NULL;
+FILE *infile=NULL;
+
+
+typedef struct                                                             /*СТРУКТУРА СТРОКИ*/
+{
+	char *str;
+	int stringlenght;
+}stringoffile;
+
+
+stringoffile *file_toram (FILE *f);
+char *toram (FILE *f);
+void comand_analize (stringoffile *arrofstr);
+int cmpstr (char *str1, char *str2);
+void arg_separation ();
+
+void fexit (stringoffile *arrofstr);
+void ffilesave (stringoffile *arrofstr);
+stringoffile *fopenfile (stringoffile *arrofstr);
+stringoffile *freadfile (stringoffile *arrofstr);
+void fset_name();
+void fhelp ();
+stringoffile *fdelete_range (stringoffile *arrofstr);
+stringoffile *fdelete_braces (stringoffile *arrofstr);
+stringoffile *finsert_symbol (stringoffile *arrofstr);
+stringoffile *fedit_string (stringoffile *arrofstr);
+void fprint_pages (stringoffile *arrofstr);
+void fprint_range (stringoffile *arrofstr);
+int fset_wrap ();
+int fset_tabwidth ();
+
+
+int main (int argc, char const *argv[])
+{
+	stringoffile *arrofstr=NULL;
+	int i=0;
+	char new_file[]="new_file";
+	struct winsize term;
+
+
+	for (i=0;i<COMANDLEN+2;i++)
+		comand_buf[i]=0;
+
+	ioctl(0,TIOCGWINSZ,&term);
+	termstr=term.ws_row;
+	termwid=term.ws_col;
+
+	
+	if (argc!=1)
+		infile=fopen(argv[1],"r");
+
+	if (infile==NULL)
+	{
+		fprintf(stderr, "===Такого файла не существует.===\n");
+		fprintf(stderr, "===Создан пустой файл с именем ""new_file"".===\n");
+		fprintf(stderr, "===Вы можете ввести файл ещё раз\nс помощью функций read/open.===\n");
+
+		infile=fopen("new_file","w+");
+		filename=malloc(9*sizeof(char));
+
+		for (i=0;i<9;i++)
+			filename[i]=new_file[i];
+
+		setnameflag=1;
+
+		savefileflag=0;
+	}
+	else
+	{
+		i=0;
+
+		while (argv[1][i]!='\0')
+		{
+			filename=(char *)realloc(filename,(i+1)*sizeof(char));
+			filename[i]=argv[1][i];  
+
+			i++;
+		}
+
+		filename=(char *)realloc(filename,(i+1)*sizeof(char));
+		filename[i]='\0';
+		setnameflag=1;
+
+		savefileflag=0;
+
+		arrofstr=file_toram(infile);
+	}
+
+	comand_analize(arrofstr);
+
+	return 0;
+}
+
+void fexit (stringoffile *arrofstr)
+{
+	int i=0;
+	char exit_force[]="force";
+
+	arg_separation();
+
+	if ((cmpstr(comand,exit_force)==0)||((savefileflag==1)&&(comand[0]=='\0')))
+	{
+		for (i=0;i<countofstr;i++)
+		{
+			free(arrofstr[i].str);
+			arrofstr[i].str=NULL;
+		}
+		free(arrofstr);
+		arrofstr=NULL;
+
+		fclose(infile);
+		infile=NULL;
+
+		free(comand);
+		comand=NULL;
+
+		free(filename);
+		filename=NULL;
+
+		exitflag=1;
+
+		printf("Bye-bye=)\n");
+
+		return;
+	}
+	else
+	if ((comand[0]=='\0')&&(savefileflag==0))
+	{
+		printf("===Файл не сохранен.===\n");
+		printf("===Используйте команду 'write', чтобы сохранить файл,\nи команду 'exit force', чтобы выйти без сохранения.===\n");
+		return;
+	}
+	else
+	{
+		printf("===Неверный аргумент.===\n");
+		printf("===Введите команду заново.===\n");
+		printf("===Аргументом должно быть слово 'force'\nили аргументов не должно быть совсем===\n");
+		return;
+	}
+}
+
+void ffilesave (stringoffile *arrofstr)
+{
+	int i=0,j=0;
+	FILE *outfile=NULL;
+
+
+	arg_separation();
+
+	if ((comand[0]!='"')&&(comand[0]!='\0'))
+	{
+		printf("===Неверный аргумент.===\n");
+		printf("===Введите команду заново.===\n");
+		printf("===Аргументом должно быть имя файла заключенное в кавычки\nили аргумент должен отсутствовать.===\n");
+		return;
+	}
+
+	if ((comand[0]=='"')&&(comand[1]=='\0'))
+	{
+		printf("===Неверный аргумент.===\n");
+		printf("===Введите команду заново.===\n");
+		printf("===Аргументом должно быть имя файла заключенное в кавычки.===\n");
+		return;
+	}
+
+	if (comand[0]=='"')	
+	{
+		i=1;
+		j=0;
+
+		while (comand[i]!='\0')
+		{
+			comand[j]=comand[i];
+			i++;
+			j++;
+		}
+		comand[j]='\0';
+	}
+
+	i=0;
+	j=0;
+
+	while (comand[i]!='\0')
+	{
+		if ((comand[i]=='"')&&(comand[i+1]!='\0'))
+		{
+			printf("===Неверный аргумент.===\n");
+			printf("===Введите команду заново.===\n");
+			printf("===Аргументом должно быть имя файла заключенное в кавычки\nили аргумент должен отсутствовать.===\n");
+			return;
+		}
+		i++;
+	}
+
+	
+	if (i!=0)
+		if (comand[i-1]!='"')
+		{
+			printf("===Неверный аргумент.===\n");
+			printf("===Введите команду заново.===\n");
+			printf("===Аргументом должно быть имя файла заключенное в кавычки\nили аргумент должен отсутствовать.===\n");
+			return;
+		}
+
+	i=0;
+
+	while (comand[i]!='\0')
+	{
+		if (comand[i]=='"')
+		{
+			comand[i]='\0';
+			break;
+		}
+		i++;
+	}
+
+	if ((comand[0]=='\0')&&(setnameflag==0))
+	{
+		printf("===Не ассоциированно имя файла.===\n");
+		printf("===Воспользуйтесь функцией ""set name"".===\n");
+		return;
+	}
+
+	i=0;
+
+	if (setnameflag==1)
+	{
+		fclose(infile);
+		infile=NULL;
+		infile=fopen(filename,"w");
+
+		for (i=0;i<countofstr;i++)
+			for (j=0;j<arrofstr[i].stringlenght;j++)
+				fputc((int)arrofstr[i].str[j],infile);
+
+		savefileflag=1;
+
+		return;
+	}
+	else
+	if ((setnameflag==0)&&(comand[0]!='\0'))
+	{
+		fclose(infile);
+		infile=NULL;
+		infile=fopen(comand,"w");
+
+		for (i=0;i<countofstr;i++)
+			for (j=0;j<arrofstr[i].stringlenght;j++)
+				fputc((int)arrofstr[i].str[j],infile);
+
+		savefileflag=1;
+
+		return;
+	}
+}
+
+stringoffile *fopenfile (stringoffile *arrofstr)
+{
+
+	int i=0,j=0;
+	FILE *readfile=NULL;
+
+
+	arg_separation();
+
+	if ((comand[0]!='"')||(comand[0]=='\0'))
+	{
+		printf("===Неверный аргумент.===\n");
+		printf("===Введите команду заново.===\n");
+		printf("===Аргументом должно быть имя файла заключенное в кавычки.===\n");
+		return NULL;
+	}
+
+	i=1;
+	j=0;
+
+	while (comand[i]!='\0')
+	{
+		comand[j]=comand[i];
+		i++;
+		j++;
+	}
+	comand[j]='\0';
+
+	i=0;
+	j=0;
+
+	if (comand[0]=='\0')
+	{
+		printf("===Неверный аргумент.===\n");
+		printf("===Введите команду заново.===\n");
+		printf("===Аргументом должно быть имя файла заключенное в кавычки.===\n");
+		return NULL;
+	}
+
+	while (comand[i]!='\0')
+	{
+		if ((comand[i]=='"')&&(comand[i+1]!='\0'))
+		{
+			printf("===Неверный аргумент.===\n");
+			printf("===Введите команду заново.===\n");
+			printf("===Аргументом должно быть имя файла заключенное в кавычки.===\n");
+			return NULL;
+		}
+		i++;
+	}
+
+	if (i!=0)
+		if (comand[i-1]!='"')
+		{
+			printf("===Неверный аргумент.===\n");
+			printf("===Введите команду заново.===\n");
+			printf("===Аргументом должно быть имя файла заключенное в кавычки.===\n");
+			return NULL;
+		}
+
+	i=0;
+
+	while (comand[i]!='\0')
+	{
+		if (comand[i]=='"')
+		{
+			comand[i]='\0';
+			break;
+		}
+		i++;
+	}
+
+	readfile=fopen(comand,"r");
+	if (readfile==NULL)
+	{
+		fprintf(stderr, "===Такого файла не существует.===\n");
+		return NULL;
+	}
+	else
+	{
+		for (i=0;i<countofstr;i++)
+		{
+			free(arrofstr[i].str);
+		}
+		free(arrofstr);
+		arrofstr=NULL;
+
+		fclose(infile);
+
+		infile=readfile;
+		readfile=NULL;
+
+		countofstr=0;
+
+		i=0;
+		free(filename);
+		filename=NULL;
+
+		while (comand[i]!='\0')
+			{
+				filename=(char *)realloc(filename,(i+1)*sizeof(char));
+				filename[i]=comand[i];  
+
+				i++;
+			}
+
+		filename=(char *)realloc(filename,(i+1)*sizeof(char));
+		filename[i]='\0';
+		setnameflag=1;
+
+		savefileflag=0;
+
+		arrofstr=file_toram(infile);
+		return arrofstr;
+	}
+}
+
+stringoffile *freadfile (stringoffile *arrofstr)
+{
+	int i=0,j=0;
+	FILE *readfile=NULL;
+
+
+	arg_separation();
+
+	if ((comand[0]!='"')||(comand[0]=='\0'))
+	{
+		printf("===Неверный аргумент.===\n");
+		printf("===Введите команду заново.===\n");
+		printf("===Аргументом должно быть имя файла заключенное в кавычки.===\n");
+		return NULL;
+	}
+
+	i=1;
+	j=0;
+
+	while (comand[i]!='\0')
+	{
+		comand[j]=comand[i];
+		i++;
+		j++;
+	}
+	comand[j]='\0';
+
+	i=0;
+	j=0;
+
+	if (comand[0]=='\0')
+	{
+		printf("===Неверный аргумент.===\n");
+		printf("===Введите команду заново.===\n");
+		printf("===Аргументом должно быть имя файла заключенное в кавычки.===\n");
+		return NULL;
+	}
+
+	while (comand[i]!='\0')
+	{
+		if ((comand[i]=='"')&&(comand[i+1]!='\0'))
+		{
+			printf("===Неверный аргумент.===\n");
+			printf("===Введите команду заново.===\n");
+			printf("===Аргументом должно быть имя файла заключенное в кавычки.===\n");
+			return NULL;
+		}
+		i++;
+	}
+
+	if (i!=0)
+		if (comand[i-1]!='"')
+		{
+			printf("===Неверный аргумент.===\n");
+			printf("===Введите команду заново.===\n");
+			printf("===Аргументом должно быть имя файла заключенное в кавычки.===\n");
+			return NULL;
+		}
+
+	i=0;
+
+	while (comand[i]!='\0')
+	{
+		if (comand[i]=='"')
+		{
+			comand[i]='\0';
+			break;
+		}
+		i++;
+	}
+
+	i=0;
+
+	readfile=fopen(comand,"r");
+	if (readfile==NULL)
+	{
+		fprintf(stderr, "===Такого файла не существует.===\n");
+		return NULL;
+	}
+	else
+	{
+		for (i=0;i<countofstr;i++)
+		{
+			free(arrofstr[i].str);
+			arrofstr[i].str=NULL;
+		}
+		free(arrofstr);
+		arrofstr=NULL;
+
+		fclose(infile);
+
+		infile=readfile;
+		readfile=NULL;
+
+		countofstr=0;
+
+		savefileflag=0;
+
+		arrofstr=file_toram(infile);
+		return arrofstr;
+	}
+}
+
+void fset_name()
+{
+	int i=0,j=0;
+
+
+	arg_separation();
+
+	if (comand[0]=='\0')
+	{
+		printf("===Ассоциация с файлом удалена.===\n");
+		free(filename);
+		filename=NULL;
+		setnameflag=0;
+		return;
+	}
+
+	if (comand[0]!='"')
+	{
+		printf("===Неверный аргумент.===\n");
+		printf("===Введите команду заново.===\n");
+		printf("===Аргументом должно быть имя файла заключенное в кавычки.===\n");
+		return;
+	}
+
+	i=1;
+	j=0;
+
+	while (comand[i]!='\0')
+	{
+		comand[j]=comand[i];
+		i++;
+		j++;
+	}
+	comand[j]='\0';
+
+	i=0;
+	j=0;
+
+	while (comand[i]!='\0')
+	{
+		if ((comand[i]=='"')&&(comand[i+1]!='\0'))
+		{
+			printf("===Неверный аргумент.===\n");
+			printf("===Введите команду заново.===\n");
+			printf("===Аргументом должно быть имя файла заключенное в кавычки.===\n");
+			return;
+		}
+		i++;
+	}
+
+	if (comand[i-1]!='"')
+	{
+		printf("===Неверный аргумент.===\n");
+		printf("===Введите команду заново.===\n");
+		printf("===Аргументом должно быть имя файла заключенное в кавычки.===\n");
+		return;
+	}
+
+	i=0;
+
+	while (comand[i]!='\0')
+	{
+		if (comand[i]=='"')
+		{
+			comand[i]='\0';
+			break;
+		}
+		i++;
+	}
+
+	i=0;
+	free(filename);
+
+	while (comand[i]!='\0')
+		{
+			filename=(char *)realloc(filename,(i+1)*sizeof(char));
+			filename[i]=comand[i];  
+
+			i++;
+		}
+
+		filename=(char *)realloc(filename,(i+1)*sizeof(char));
+		filename[i]='\0';
+		setnameflag=1;
+
+	return;
+}
+
+void fhelp ()
+{
+	int savecountofstr=0,i=0;
+	stringoffile *helpfileptr=NULL;
+	FILE *helpfile=NULL;
+
+	
+	arg_separation();
+
+	if (comand[0]!='\0')
+	{
+		printf("===Такой команды не существует.===\n");
+		printf("===Введите команду заново.===\n");
+		return;
+	}
+	else
+	{
+		helpfile=fopen("help_minivim","r");
+
+		savecountofstr=countofstr;
+		countofstr=0;
+		helpfileptr=file_toram(helpfile);
+
+		fprint_pages(helpfileptr);
+
+		for (i=0;i<countofstr;i++)
+		{
+			free(helpfileptr[i].str);
+			helpfileptr[i].str=NULL;
+		}
+		free(helpfileptr);
+		helpfileptr=NULL;
+
+		fclose(helpfile);
+
+		countofstr=savecountofstr;
+	}
+
+	return;
+}
+
+stringoffile *finsert_after (stringoffile *arrofstr)
+{
+	int i=0,j=0,k=0,arg1=0,multistrflag=0,newstrflag=0;
+	stringoffile insertstr;
+	char *ptr=NULL;
+
+	arg_separation();
+
+	if (((comand[0]>'9')||(comand[0]<'0'))&&(comand[0]!='"'))
+	{
+		printf("===Неверные аргументы.===\n");
+		printf("===Введите команду заново.===\n");
+		printf("===Аргументами должны быть число больше или равное 0\nи строка, заключенная в двойные кавычки\nили несколько строк заключенные в тройные кавычки.===\n");
+		return arrofstr;
+	}
+
+	i=0;
+
+	if ((comand[0]>='0')&&(comand[0]<='9'))
+	{
+		arg1=atoi(comand);
+
+		while (comand[i]!=' ')
+		{
+			if ((comand[i]>'9')||(comand[i]<'0'))
+			{
+				printf("===Неверные аргументы.===\n");
+				printf("===Введите команду заново.===\n");
+				printf("===Аргументами должны быть число больше или равное 0\nи строка, заключенная в двойные кавычки\nили несколько строк заключенные в тройные кавычки.===\n");
+				return arrofstr;
+			}
+			i++;
+		}
+	}
+	else
+	{
+		arg1=-1;
+	}
+
+
+	if (arg1>countofstr)
+	{
+		printf("===Неверные аргументы.===\n");
+		printf("===Введите команду заново.===\n");
+		printf("===Аргументами должны быть число больше или равное 0\nи строка, заключенная в двойные кавычки\nили несколько строк заключенные в тройные кавычки.===\n");
+		return arrofstr;
+	}
+
+	i=0;
+
+	if (arg1!=-1)
+	{
+		while ((comand[i]!=' '))
+		{
+			i++;
+		}
+
+		comandrest=i;
+		arg_separation();
+	}
+
+	if (comand[0]!='"')
+	{
+		printf("===Неверные аргументы.===\n");
+		printf("===Введите команду заново.===\n");
+		printf("===Аргументами должны быть число больше или равное 0\nи строка, заключенная в двойные кавычки\nили несколько строк заключенные в тройные кавычки.===\n");
+		return arrofstr;
+	}
+
+	if (comand[1]!='"')
+	{
+		printf("===Неверные аргументы.===\n");
+		printf("===Введите команду заново.===\n");
+		printf("===Аргументами должны быть число больше или равное 0\nи строка, заключенная в двойные кавычки\nили несколько строк заключенные в тройные кавычки.===\n");
+		return arrofstr;
+	}
+
+	if (comand[2]=='"')
+	{
+		multistrflag=1;
+		i=3;
+	}
+	else
+	{
+		multistrflag=0;
+		i=2;
+	}
+
+	j=0;
+
+	while (comand[i]!='\0')
+	{
+		comand[j]=comand[i];
+		i++;
+		j++;
+	}
+	comand[j]='\0';
+
+	i=0;
+	j=0;
+
+	if ((comand[0]=='\0')&&(multistrflag==0))
+	{
+		printf("===Неверные аргументы.===\n");
+		printf("===Введите команду заново.===\n");
+		printf("===Аргументами должны быть число больше или равное 0\nи строка, заключенная в двойные кавычки\nили несколько строк заключенные в тройные кавычки.===\n");
+		return arrofstr;
+	}
+
+	if (multistrflag==0)                                                   /*ОДНОСТРОЧНЫЙ РЕЖИМ*/
+	{
+		while (comand[i]!='\0')
+		{
+			i++;
+		}
+
+		if (i-3>=0)
+		{
+			if ((comand[i-1]!='"')||(comand[i-2]!='"'))
+			{
+				printf("===Неверные аргументы.===\n");
+				printf("===Введите команду заново.===\n");
+				printf("===Аргументами должны быть число больше или равное 0\nи строка, заключенная в двойные кавычки\nили несколько строк заключенные в тройные кавычки.===\n");
+				return arrofstr;
+			}
+		}
+		else
+		{
+			printf("===Неверные аргументы.===\n");
+			printf("===Введите команду заново.===\n");
+			printf("===Аргументами должны быть число больше или равное 0\nи строка, заключенная в двойные кавычки\nили несколько строк заключенные в тройные кавычки.===\n");
+			return arrofstr;
+		}
+
+		comand[i-2]='\0';
+
+		if (comand[0]=='\0')
+		{
+			printf("===Неверные аргументы.===\n");
+			printf("===Введите команду заново.===\n");
+			printf("===Аргументами должны быть число больше или равное 0\nи строка, заключенная в двойные кавычки\nили несколько строк заключенные в тройные кавычки.===\n");
+			return arrofstr;
+		}
+
+		if (i-4>=0)
+		{
+			if ((comand[i-3]=='\\')&&(comand[i-4]!='\\'))
+			{
+				printf("===Неверные аргументы.===\n");
+				printf("===Введите команду заново.===\n");
+				printf("===Аргументами должны быть число больше или равное 0\nи строка, заключенная в двойные кавычки\nили несколько строк заключенные в тройные кавычки.===\n");
+				return arrofstr;
+			}
+		}
+
+		i=0;
+		k=0;
+		j=0;
+
+		while (1)
+		{
+			i=k;
+
+			insertstr.stringlenght=0;
+
+			while (comand[i]!='\0')
+			{
+				insertstr.stringlenght++;
+				ptr=(char *)realloc(ptr,insertstr.stringlenght*sizeof(char));
+
+				if (comand[i]=='\\')
+				{
+					if (comand[i+1]=='t')
+					{
+						ptr[insertstr.stringlenght-1]='\t';
+						i++;
+					}
+					else
+					if (comand[i+1]=='\\')
+					{
+						ptr[insertstr.stringlenght-1]='\\';
+						i++;
+					}
+					else
+					if (comand[i+1]=='r')
+					{
+						ptr[insertstr.stringlenght-1]='\r';
+						i++;
+					}
+					else
+					if (comand[i+1]=='"')
+					{
+						ptr[insertstr.stringlenght-1]='"';
+						i++;
+					}
+					else
+					if (comand[i+1]=='n')
+					{
+						ptr[insertstr.stringlenght-1]='\n';
+						i++;
+						i++;
+						newstrflag=1;
+						break;
+					}
+				}
+				else
+				{
+					ptr[insertstr.stringlenght-1]=comand[i];
+				}
+
+				i++;
+			}
+
+			k=i;
+
+			if (newstrflag==0)
+			{
+				insertstr.stringlenght++;
+				ptr=(char *)realloc(ptr,insertstr.stringlenght*sizeof(char));
+				ptr[insertstr.stringlenght-1]='\n';
+			}
+
+			insertstr.str=ptr;
+			ptr=NULL;
+
+			countofstr++;
+
+			arrofstr=(stringoffile *)realloc(arrofstr,countofstr*sizeof(stringoffile));
+
+			if (arg1!=-1)
+			{
+				i=countofstr-1;
+
+				while (i!=arg1)
+				{
+					arrofstr[i].str=arrofstr[i-1].str;
+					arrofstr[i].stringlenght=arrofstr[i-1].stringlenght;
+
+					i--;
+				}
+
+				arrofstr[i].str=NULL;
+
+				arrofstr[i].str=insertstr.str;
+				arrofstr[i].stringlenght=insertstr.stringlenght;
+
+				insertstr.str=NULL;
+
+				arg1++;
+			}
+			else
+			{
+				arrofstr[countofstr-1].str=insertstr.str;
+				arrofstr[countofstr-1].stringlenght=insertstr.stringlenght;
+
+				insertstr.str=NULL;
+			}
+
+			newstrflag=0;
+
+			if (comand[k]=='\0')
+			{
+				return arrofstr;
+			}
+		}
+	}
+	else
+	if (multistrflag==1)                                                   /*МНОГОСТРОЧНЫЙ РЕЖИМ*/
+	{
+		
+	}
+}
+
+stringoffile *fdelete_range (stringoffile *arrofstr)
+{
+	int letter=0,len=0,i=0,j=0,l=0,termstr1=0,countofstr1=0,arg1=0,arg2=0,argflag=0;
+	char *ptr=NULL;
+
+
+	arg_separation();
+
+	if (((comand[0]>'9')||(comand[0]<'1'))&&(comand[0]!='\0'))
+	{
+		printf("===Неверные аргументы.===\n");
+		printf("===Введите команду заново.===\n");
+		printf("===Аргументами должны быть числа больше 0,\nпричём первое число должно быть меньше второго.===\n");
+		return arrofstr;
+	}
+
+	while (comand[i]!='\0')
+	{
+		if (((comand[i]>'9')||(comand[i]<'0'))&&(comand[i]!=' '))
+		{
+			printf("===Неверные аргументы.===\n");
+			printf("===Введите команду заново.===\n");
+			printf("===Аргументами должны быть числа больше 0,\nпричём первое число должно быть меньше второго.===\n");
+			return;
+		}
+		i++;
+	}
+
+	i=0;
+
+	if (comand[0]=='\0')
+	{
+		printf("===Неверные аргументы.===\n");
+		printf("===Введите команду заново.===\n");
+		printf("===Аргументами должны быть числа больше 0,\nпричём первое число должно быть меньше второго.===\n");
+		return arrofstr;
+	}
+	else
+	{
+		arg1=atoi(comand);
+
+		while ((comand[i]!=' '))
+		{
+			if (comand[i]=='\0')
+			{
+				i=-1;
+				break;
+			}
+			i++;
+		}
+
+		if (i!=-1)
+		{
+			comandrest=i;
+			arg_separation();
+			arg2=atoi(comand);
+			argflag=1;
+		}
+
+		if ((((arg1>arg2)||(arg2>countofstr))&&(argflag==1))||(arg1>countofstr))
+		{
+			printf("===Неверные аргументы.===\n");
+			printf("===Введите команду заново.===\n");
+			printf("===Аргументами должны быть числа больше 0,\nпричём первое число должно быть меньше второго.===\n");
+			return arrofstr;
+		}
+	}
+
+	if (argflag==0)
+	{
+		arg2=countofstr;
+	}
+
+
+	for (i=(arg1-1);i<arg2;i++)
+	{
+		ptr=arrofstr[i].str;
+		free(ptr);
+		ptr=NULL;
+		arrofstr[i].str=NULL;
+	}
+
+	i=arg1-1;
+	j=arg2;
+
+	while (j!=countofstr)
+	{
+		arrofstr[i].str=arrofstr[j].str;
+		arrofstr[i].stringlenght=arrofstr[j].stringlenght;
+
+		i++;
+		j++;
+	}
+
+	countofstr=countofstr-(arg2-(arg1-1));
+
+	return arrofstr;
+}
+
+stringoffile *fdelete_braces (stringoffile *arrofstr)
+{
+	int letter=0,len=0,len1=0,strtodellen=0,i=0,j=0,k=0,l=0,arg1=0,arg2=0,argflag=0,balanceflag=0,existflag=0,glueflag=0,inflag=0,mainstrflag=-1;
+	char *ptr=NULL,*ptr1=NULL;
+	int *strtodel=NULL;
+
+	arg_separation();
+
+	if (((comand[0]>'9')||(comand[0]<'1'))&&(comand[0]!='\0'))
+	{
+		printf("===Неверные аргументы.===\n");
+		printf("===Введите команду заново.===\n");
+		printf("===Аргументами должны быть числа больше 0,\nпричём первое число должно быть меньше второго.===\n");
+		return;
+	}
+
+	while (comand[i]!='\0')
+	{
+		if (((comand[i]>'9')||(comand[i]<'0'))&&(comand[i]!=' '))
+		{
+			printf("===Неверные аргументы.===\n");
+			printf("===Введите команду заново.===\n");
+			printf("===Аргументами должны быть числа больше 0,\nпричём первое число должно быть меньше второго.===\n");
+			return;
+		}
+		i++;
+	}
+
+	i=0;
+
+	if (comand[0]=='\0')
+	{
+		arg1=1;
+		arg2=countofstr;
+	}
+	else
+	{
+		arg1=atoi(comand);
+
+		while ((comand[i]!=' '))
+		{
+			if (comand[i]=='\0')
+			{
+				i=-1;
+				break;
+			}
+			i++;
+		}
+
+		if (i!=-1)
+		{
+			comandrest=i;
+			arg_separation();
+			arg2=atoi(comand);
+			argflag=1;
+		}
+
+		if ((((arg1>arg2)||(arg2>countofstr))&&(argflag==1))||(arg1>countofstr))
+		{
+			printf("===Неверные аргументы.===\n");
+			printf("===Введите команду заново.===\n");
+			printf("===Аргументами должны быть числа больше 0,\nпричём первое число должно быть меньше второго.===\n");
+			return;
+		}
+	}
+
+	if (argflag==0)
+	{
+		arg2=countofstr;
+	}
+
+	for (i=(arg1-1);i<arg2;i++)
+	{
+		len=arrofstr[i].stringlenght;
+		ptr=arrofstr[i].str;
+
+		if ((balanceflag!=0)&&(i!=(arg1-1)))
+		{
+			if (mainstrflag==-1)
+			{
+				mainstrflag=i-1;
+			}
+
+			len1=arrofstr[mainstrflag].stringlenght;
+			ptr1=arrofstr[mainstrflag].str;
+
+			strtodellen++;
+			strtodel=(int *)realloc(strtodel,strtodellen*sizeof(int));
+			strtodel[strtodellen-1]=i;
+
+			ptr1=(char *)realloc(ptr1,(len+len1-1)*sizeof(char));
+
+			j=len1-1;
+			k=0;
+
+			while (ptr[k]!='\n')
+			{
+				ptr1[j]=ptr[k];
+				j++;
+				k++;
+			}
+			ptr1[j]='\n';
+
+			arrofstr[mainstrflag].stringlenght=len+len1-1;
+			arrofstr[mainstrflag].str=ptr1;
+
+			ptr1=NULL;
+
+			len=arrofstr[mainstrflag].stringlenght;
+			ptr=arrofstr[mainstrflag].str;
+
+			glueflag=1;
+		}
+
+		if (glueflag==0)
+		{
+			j=0;
+		}
+		else
+		{
+			j=len1-1;
+		}
+
+		k=0;
+
+		while (ptr[j]!='\n')
+		{
+			inflag=1;
+
+			if (ptr[j]=='{')
+			{
+				balanceflag++;
+				existflag=1;
+			}
+			else
+			if ((ptr[j]=='}')&&(existflag==1))
+			{
+				balanceflag--;
+			}
+
+			if ((balanceflag>0)||((existflag==1)&&(balanceflag==0)))
+			{
+				for (k=j;k<(len-1);k++)
+				{
+					ptr[k]=ptr[k+1];					
+				}
+
+				len--;
+				j--;
+
+				if (balanceflag==0)
+				{
+					existflag=0;
+				}
+			}
+
+			j++;
+		}
+
+		if ((ptr[0]=='\n')&&(inflag==1)&&(glueflag==0))
+		{
+			inflag=0;
+
+			strtodellen++;
+			strtodel=(int *)realloc(strtodel,strtodellen*sizeof(int));
+			strtodel[strtodellen-1]=i;
+			ptr=NULL;
+
+			if (balanceflag==0)
+				{
+					mainstrflag=-1;
+				}
+		}
+		else
+		{
+			if (glueflag==1)
+			{
+				arrofstr[mainstrflag].stringlenght=len;
+				arrofstr[mainstrflag].str=ptr;
+				ptr=NULL;
+				glueflag=0;
+
+				if (balanceflag==0)
+				{
+					mainstrflag=-1;
+				}
+			}
+			else
+			if (glueflag==0)	
+			{
+				arrofstr[i].stringlenght=len;
+				arrofstr[i].str=ptr;
+				ptr=NULL;
+
+				if (balanceflag==0)
+				{
+					mainstrflag=-1;
+				}
+			}	
+		}
+	}
+
+	for (i=(strtodellen-1);i>-1;i--)
+	{
+		k=strtodel[i];
+		free(arrofstr[k].str);
+		arrofstr[k].str=NULL;
+
+		l=k;
+		j=k+1;
+
+		while (j!=countofstr)
+		{
+			arrofstr[l].str=arrofstr[j].str;
+			arrofstr[l].stringlenght=arrofstr[j].stringlenght;
+
+			l++;
+			j++;
+		}
+
+		countofstr--;
+	}
+
+	free(strtodel);
+	strtodel=NULL;
+
+	return arrofstr;
+}
+
+stringoffile *finsert_symbol (stringoffile *arrofstr)
+{
+	int i=0,j=0,arg1=0,arg2=0,arg3=0,len=0,spacecount=0,symbolflag=0;
+	char *ptr=NULL;
+	stringoffile str2;
+	stringoffile *arrofstr2=NULL;
+
+
+	while (comand[i]!='\0')
+	{
+		if ((comand[i]=='\\')&&(comand[i+1]=='#'))
+			symbolflag=1;
+
+		i++;
+	}
+
+	i=0;
+
+	arg_separation();
+	
+	if (((comand[0]>'9')||(comand[0]<'1'))&&(comand[0]!='\0'))
+	{
+		printf("===Неверные аргументы.===\n");
+		printf("===Введите команду заново.===\n");
+		printf("===Аргументами должны быть два числа больше 0 и символ.===\n");
+		printf("===Введите '0' на месте второго аргумента,\nчтобы добавить символ в начало строки.===\n");
+		return arrofstr;
+	}
+
+	while (comand[i]!='\0')
+	{
+		if (comand[i]==' ')
+			spacecount++;
+
+		i++;
+	}
+
+	if (spacecount!=2)
+	{
+		printf("===Неверные аргументы.===\n");
+		printf("===Введите команду заново.===\n");
+		printf("===Аргументами должны быть два числа больше 0 и символ.===\n");
+		printf("===Введите '0' на месте второго аргумента,\nчтобы добавить символ в начало строки.===\n");
+		return arrofstr;
+	}
+
+	i=0;
+	spacecount=0;
+
+	while (comand[i]!='\0')
+	{
+		if ((((comand[i]>'9')||(comand[i]<'0'))&&(comand[i]!=' ')&&(comand[i]!='\\'))&&(comand[i+1]!='\0'))
+		{
+			printf("===Неверные аргументы.===\n");
+			printf("===Введите команду заново.===\n");
+			printf("===Аргументами должны быть два числа больше 0 и символ.===\n");
+			printf("===Введите '0' на месте второго аргумента,\nчтобы добавить символ в начало строки.===\n");
+			return arrofstr;
+		}
+		i++;
+	} 
+
+	i=0;
+
+	while (comand[i]!=' ')
+	{
+		if ((comand[i]>'9')||(comand[i]<'0')||(comand[0]=='0'))
+		{
+			printf("===Неверные аргументы.===\n");
+			printf("===Введите команду заново.===\n");
+			printf("===Аргументами должны быть два числа больше 0 и символ.===\n");
+			printf("===Введите '0' на месте второго аргумента,\nчтобы добавить символ в начало строки.===\n");
+			return arrofstr;
+		}
+		i++;
+	}
+
+	arg1=atoi(comand);
+	comandrest=i;
+	arg_separation();
+
+	i=0;
+
+	while (comand[i]!=' ')
+	{
+		if ((comand[i]>'9')||(comand[i]<'0'))
+		{
+			printf("===Неверные аргументы.===\n");
+			printf("===Введите команду заново.===\n");
+			printf("===Аргументами должны быть два числа больше 0 и символ.===\n");
+			printf("===Введите '0' на месте второго аргумента,\nчтобы добавить символ в начало строки.===\n");
+			return arrofstr;
+		}
+		i++;
+	}
+
+	arg2=atoi(comand);
+	comandrest=i;
+	arg_separation();
+
+	i=0;
+
+	if (symbolflag==1)
+	{
+		comand[1]='#';
+		comand[2]='\0';
+	}
+
+	if ((comand[0]=='\\')&&(comand[1]!='\0')&&(comand[1]!='#')&&(comand[1]!='t')&&(comand[1]!='n'))
+	{
+		printf("===Неверные аргументы.===\n");
+		printf("===Введите команду заново.===\n");
+		printf("===Аргументами должны быть два числа больше 0 и символ.===\n");
+		printf("===Введите '0' на месте второго аргумента,\nчтобы добавить символ в начало строки.===\n");
+		return arrofstr;
+	}
+	else
+	if (comand[1]!='\0')
+	{
+		if (comand[1]=='#')
+			arg3='#';
+		else
+		if (comand[1]=='t')
+			arg3='\t';
+		else
+		if (comand[1]=='n')
+			arg3='\n';
+	}
+	else
+	if (comand[1]=='\0')
+	{
+		arg3=comand[0];
+	}
+
+	if (arg1>countofstr)
+	{
+		printf("===Строки с таким номером в файле не существует.===\n");
+		printf("===Введите команду заново.===\n");
+		return arrofstr;
+	}
+
+
+	len=arrofstr[arg1-1].stringlenght;
+	ptr=arrofstr[arg1-1].str;
+
+	if (arg3!='\n')
+	{
+		if (arg2<len)
+		{	
+			len++;
+			i=len;
+
+			ptr=(char *)realloc(ptr,len*sizeof(char));
+
+			while (i!=(arg2+1))
+			{
+				ptr[i-1]=ptr[i-2];
+
+				i--;
+			}
+
+			ptr[arg2]=(char)arg3;
+
+			arrofstr[arg1-1].stringlenght=len;
+			arrofstr[arg1-1].str=ptr;
+		}
+		else
+		{
+			len++;
+			i=len;
+
+			ptr=(char *)realloc(ptr,len*sizeof(char));
+
+			ptr[i-1]=ptr[i-2];
+
+			ptr[i-2]=(char)arg3;
+
+			arrofstr[arg1-1].stringlenght=len;
+			arrofstr[arg1-1].str=ptr;
+		}
+	}
+	else
+	{
+		if (arg2<len)
+		{	
+			len++;
+			i=len;
+
+			ptr=(char *)realloc(ptr,len*sizeof(char));
+
+			while (i!=(arg2+1))
+			{
+				ptr[i-1]=ptr[i-2];
+
+				i--;
+			}
+
+			ptr[arg2]=(char)arg3;
+
+			arrofstr[arg1-1].str=ptr;
+		}
+		else
+		{
+			len++;
+			i=len;
+
+			ptr=(char *)realloc(ptr,len*sizeof(char));
+
+			ptr[i-1]=ptr[i-2];
+
+			ptr[i-2]=(char)arg3;
+
+			arrofstr[arg1-1].str=ptr;
+		}
+
+		i=0;
+
+		while (ptr[i]!='\n')
+		{
+			i++;
+		} 
+
+		arrofstr[arg1-1].stringlenght=i+1;
+
+		str2.str=NULL;
+		str2.stringlenght=0;
+		i++;
+		while (ptr[i]!='\n')
+		{
+			str2.stringlenght++;
+			str2.str=(char *)realloc(str2.str,str2.stringlenght*sizeof(char));
+			str2.str[str2.stringlenght-1]=ptr[i];
+
+			i++;
+		}
+		str2.stringlenght++;
+		str2.str=(char *)realloc(str2.str,str2.stringlenght*sizeof(char));
+		str2.str[str2.stringlenght-1]='\n';
+
+		countofstr++;
+
+		arrofstr2=(stringoffile *)realloc(arrofstr,countofstr*sizeof(stringoffile));
+		if (arrofstr2==NULL)
+		{
+			free(arrofstr2);
+			printf("===Недостаточно памяти.===\n");
+			return arrofstr;
+		}
+		else
+		{
+			arrofstr=arrofstr2;
+			arrofstr2=NULL;
+		}
+
+		i=countofstr;
+		while (i!=(arg1+1))
+		{
+			arrofstr[i-1].str=arrofstr[i-2].str;
+			arrofstr[i-1].stringlenght=arrofstr[i-2].stringlenght;
+
+			i--;
+		}
+
+		arrofstr[arg1].str=str2.str;
+		arrofstr[arg1].stringlenght=str2.stringlenght;
+	}
+
+	ptr=NULL;
+	return arrofstr;
+}
+
+stringoffile *fedit_string (stringoffile *arrofstr)
+{
+	int i=0,j=0,arg1=0,arg2=0,arg3=0,len=0,spacecount=0,symbolflag=0;
+	char *ptr=NULL;
+	stringoffile str2;
+	stringoffile *arrofstr2=NULL;
+
+
+	while (comand[i]!='\0')
+	{
+		if ((comand[i]=='\\')&&(comand[i+1]=='#'))
+			symbolflag=1;
+
+		i++;
+	}
+
+	i=0;
+
+	arg_separation();
+	
+	if (((comand[0]>'9')||(comand[0]<'1'))&&(comand[0]!='\0'))
+	{
+		printf("===Неверные аргументы.===\n");
+		printf("===Введите команду заново.===\n");
+		printf("===Аргументами должны быть два числа больше 0 и символ.===\n");
+		return arrofstr;
+	}
+
+	while (comand[i]!='\0')
+	{
+		if (comand[i]==' ')
+			spacecount++;
+
+		i++;
+	}
+
+	if (spacecount!=2)
+	{
+		printf("===Неверные аргументы.===\n");
+		printf("===Введите команду заново.===\n");
+		printf("===Аргументами должны быть два числа больше 0 и символ.===\n");
+		return arrofstr;
+	}
+
+	i=0;
+	spacecount=0;
+
+	while (comand[i]!='\0')
+	{
+		if ((((comand[i]>'9')||(comand[i]<'0'))&&(comand[i]!=' ')&&(comand[i]!='\\'))&&(comand[i+1]!='\0'))
+		{
+			printf("===Неверные аргументы.===\n");
+			printf("===Введите команду заново.===\n");
+			printf("===Аргументами должны быть два числа больше 0 и символ.===\n");
+			return arrofstr;
+		}
+		i++;
+	} 
+
+	i=0;
+
+	while (comand[i]!=' ')
+	{
+		if ((comand[i]>'9')||(comand[i]<'0')||(comand[0]=='0'))
+		{
+			printf("===Неверные аргументы.===\n");
+			printf("===Введите команду заново.===\n");
+			printf("===Аргументами должны быть два числа больше 0 и символ.===\n");
+			return arrofstr;
+		}
+		i++;
+	}
+
+	arg1=atoi(comand);
+	comandrest=i;
+	arg_separation();
+
+	i=0;
+
+	while (comand[i]!=' ')
+	{
+		if ((comand[i]>'9')||(comand[i]<'0')||(comand[0]=='0'))
+		{
+			printf("===Неверные аргументы.===\n");
+			printf("===Введите команду заново.===\n");
+			printf("===Аргументами должны быть два числа больше 0 и символ.===\n");
+			return arrofstr;
+		}
+		i++;
+	}
+
+	arg2=atoi(comand);
+	comandrest=i;
+	arg_separation();
+
+	i=0;
+
+	if (symbolflag==1)
+	{
+		comand[1]='#';
+		comand[2]='\0';
+	}
+
+	if ((comand[0]=='\\')&&(comand[1]!='\0')&&(comand[1]!='#')&&(comand[1]!='t')&&(comand[1]!='n'))
+	{
+		printf("===Неверные аргументы.===\n");
+		printf("===Введите команду заново.===\n");
+		printf("===Аргументами должны быть два числа больше 0 и символ.===\n");
+		return arrofstr;
+	}
+	else
+	if (comand[1]!='\0')
+	{
+		if (comand[1]=='#')
+			arg3='#';
+		else
+		if (comand[1]=='t')
+			arg3='\t';
+		else
+		if (comand[1]=='n')
+			arg3='\n';
+	}
+	else
+	if (comand[1]=='\0')
+	{
+		arg3=comand[0];
+	}
+
+	if (arg1>countofstr)
+	{
+		printf("===Строки с таким номером в файле не существует.===\n");
+		printf("===Введите команду заново.===\n");
+		return arrofstr;
+	}
+
+
+	len=arrofstr[arg1-1].stringlenght;
+	ptr=arrofstr[arg1-1].str;
+
+	if (arg2>(len-1))
+	{
+		printf("===В строке нет символа с таким номером.===\n");
+		printf("===Введите команду заново.===\n");
+		ptr=NULL;
+		return arrofstr;
+	}
+
+	ptr[arg2-1]=(char)arg3;
+
+	if (arg3=='\n')
+	{
+		i=0;
+
+		while (ptr[i]!='\n')
+		{
+			i++;
+		} 
+
+		arrofstr[arg1-1].stringlenght=i+1;
+
+		str2.str=NULL;
+		str2.stringlenght=0;
+		i++;
+		while (ptr[i]!='\n')
+		{
+			str2.stringlenght++;
+			str2.str=(char *)realloc(str2.str,str2.stringlenght*sizeof(char));
+			str2.str[str2.stringlenght-1]=ptr[i];
+
+			i++;
+		}
+		str2.stringlenght++;
+		str2.str=(char *)realloc(str2.str,str2.stringlenght*sizeof(char));
+		str2.str[str2.stringlenght-1]='\n';
+
+		countofstr++;
+
+		arrofstr2=(stringoffile *)realloc(arrofstr,countofstr*sizeof(stringoffile));
+		if (arrofstr2==NULL)
+		{
+			free(arrofstr2);
+			printf("===Недостаточно памяти.===\n");
+			return arrofstr;
+		}
+		else
+		{
+			arrofstr=arrofstr2;
+			arrofstr2=NULL;
+		}
+
+		i=countofstr;
+		while (i!=(arg1+1))
+		{
+			arrofstr[i-1].str=arrofstr[i-2].str;
+			arrofstr[i-1].stringlenght=arrofstr[i-2].stringlenght;
+
+			i--;
+		}
+
+		arrofstr[arg1].str=str2.str;
+		arrofstr[arg1].stringlenght=str2.stringlenght;
+	}
+
+	ptr=NULL;
+	return arrofstr;
+}
+
+void fprint_pages (stringoffile *arrofstr)
+{
+	int letter=0,len=0,i=0,j=0,k=0,l=0,termstr1=0,countofstr1=0,printstep=0,endoffuncflag=0,wrapflag=0,errflag=0,stringwrapflag=0,endofstrflag=0;
+	char *ptr=NULL;
+	struct winsize term;
+
+
+	ioctl(0,TIOCGWINSZ,&term);
+	termstr=term.ws_row;
+	termwid=term.ws_col;
+
+	arg_separation();
+
+	if (comand[0]=='\0')
+	{
+		termstr1=termstr-1;
+		countofstr1=countofstr;
+
+		if (countofstr1<termstr1)
+			{
+				termstr1=countofstr1;
+			}
+
+		while (1)
+		{
+			for (i=0;i<termstr1;i++)
+			{
+				len=arrofstr[i+printstep].stringlenght;
+				ptr=arrofstr[i+printstep].str;
+
+				letter=0;
+				endofstrflag=0;
+
+				if ((setwrapflag==0)&&(termwid<len))
+				{
+						len=termwid;
+						wrapflag=1;
+				}
+
+				if ((setwrapflag==1)&&(termwid<len))
+				{
+					for (j=0;j<len;j++)
+					{
+						if (ptr[j]=='	')
+							letter=letter+settabwidthflag;
+						else
+							letter++;
+					}
+
+					while (letter>termwid)
+					{
+						letter=letter-termwid;
+						l++;
+					}
+
+					stringwrapflag=1;
+				}
+
+				letter=0;
+
+				if ((stringwrapflag==1)&&((i+l+1)>=termstr))
+					break;
+
+				for (j=0;j<len;j++)
+				{
+					if (ptr[j]=='	')
+					{
+						for (k=0;k<settabwidthflag;k++)
+						{
+							letter++;
+
+							if ((setwrapflag==0)&&(letter==len))
+							{
+								endofstrflag=1;
+								break;
+							}
+
+							putchar(' ');
+						}
+					}
+					else
+					{
+						letter++;
+
+						if ((setwrapflag==0)&&(letter==len))
+						{
+							endofstrflag=1;
+							break;
+						}
+
+						putchar(ptr[j]);
+					}
+
+					if (endofstrflag==1)
+						break;
+				}
+
+				if ((wrapflag==1)||(endofstrflag==1))
+				{
+					putchar('\n');
+					wrapflag=0;
+				}
+			}
+
+			countofstr1=countofstr1-i;
+			printstep=printstep+i;
+
+			l=0;
+			stringwrapflag=0;
+
+			if (countofstr1<termstr1)
+			{
+				termstr1=countofstr1;
+			}
+
+			if (termstr1<=0)
+			{
+				endoffuncflag=1;
+				break;
+			}
+
+			if (endoffuncflag!=1)                                      /*ОБРАБОТЧИК ОПЕРАЦИЙ*/
+				while (1)
+				{
+					printf(">");
+					letter=getchar();
+
+					if (letter=='q')
+					{
+						endoffuncflag=1;
+
+						while (letter!='\n')
+						{
+							letter=getchar();
+							if (letter!='\n')
+								errflag=1;
+						}
+
+						if (errflag!=1)
+							break;
+					}
+					else
+					if (letter==' ')
+					{
+						while (letter!='\n')
+						{
+							letter=getchar();
+							if (letter!='\n')
+								errflag=1;
+						}
+
+						if (errflag!=1)
+							break;
+					}
+					else
+					{
+						errflag=2;
+					}
+
+					if (errflag!=0)
+					{
+						printf("===Такой операции не существует.===\n");
+						printf("===Введите операцию заново.===\n");
+						if (errflag==2)
+							while (letter!='\n')
+								letter=getchar();
+
+						errflag=0;
+						endoffuncflag=0;
+					}
+				}
+
+			if (endoffuncflag==1)
+			{
+				break;
+			}
+		}
+		ptr=NULL;
+		return;
+	}
+	else
+	{
+		printf("===Такой команды не существует.===\n");
+		printf("===Введите команду заново.===\n");
+		return;
+	}
+}
+
+void fprint_range (stringoffile *arrofstr)
+{
+	int letter=0,len=0,i=0,j=0,l=0,termstr1=0,countofstr1=0,k=0,printstep=0,endoffuncflag=0,arg1=0,arg2=0,
+	argflag=0,wrapflag=0,errflag=0,stringwrapflag=0,endofstrflag=0;
+	char *ptr=NULL;
+	struct winsize term;
+
+
+	ioctl(0,TIOCGWINSZ,&term);
+	termstr=term.ws_row;
+	termwid=term.ws_col;
+
+	arg_separation();
+
+	if (((comand[0]>'9')||(comand[0]<'1'))&&(comand[0]!='\0'))
+	{
+		printf("===Неверные аргументы.===\n");
+		printf("===Введите команду заново.===\n");
+		printf("===Аргументами должны быть числа больше 0,\nпричём первое число должно быть меньше второго.===\n");
+		return;
+	}
+
+	while (comand[i]!='\0')
+	{
+		if (((comand[i]>'9')||(comand[i]<'0'))&&(comand[i]!=' '))
+		{
+			printf("===Неверные аргументы.===\n");
+			printf("===Введите команду заново.===\n");
+			printf("===Аргументами должны быть числа больше 0,\nпричём первое число должно быть меньше второго.===\n");
+			return;
+		}
+		i++;
+	}
+
+	i=0;
+
+	if (comand[0]=='\0')
+	{
+		fprint_pages(arrofstr);
+		return;
+	}
+	else
+	{
+		arg1=atoi(comand);
+
+		while ((comand[i]!=' '))
+		{
+			if (comand[i]=='\0')
+			{
+				i=-1;
+				break;
+			}
+			i++;
+		}
+
+		if (i!=-1)
+		{
+			comandrest=i;
+			arg_separation();
+			arg2=atoi(comand);
+			argflag=1;
+		}
+
+		if ((((arg1>arg2)||(arg2>countofstr))&&(argflag==1))||(arg1>countofstr))
+		{
+			printf("===Неверные аргументы.===\n");
+			printf("===Введите команду заново.===\n");
+			printf("===Аргументами должны быть числа больше 0,\nпричём первое число должно быть меньше второго.===\n");
+			return;
+		}
+
+		arg1--;
+
+		termstr1=termstr-1;
+		
+		if (argflag==1)
+			countofstr1=arg2-arg1;
+		else
+			countofstr1=countofstr-arg1;
+
+		if (countofstr1<1)
+		{
+			printf("===Неверные аргументы.===\n");
+			printf("===Введите команду заново.===\n");
+			printf("===Аргументами должны быть числа больше 0,\nпричём первое число должно быть меньше второго.===\n");
+			return;
+		}
+
+		if (countofstr1<termstr1)
+		{
+			termstr1=countofstr1;
+		}
+
+		while (1)
+		{
+			for (i=0;i<termstr1;i++)
+			{
+				len=arrofstr[i+printstep+arg1].stringlenght;
+				ptr=arrofstr[i+printstep+arg1].str;
+
+				letter=0;
+				endofstrflag=0;
+
+				if ((setwrapflag==0)&&(termwid<len))
+				{
+						len=termwid;
+						wrapflag=1;
+				}
+
+				if ((setwrapflag==1)&&(termwid<len))
+				{
+					for (j=0;j<len;j++)
+					{
+						if (ptr[j]=='	')
+							letter=letter+settabwidthflag;
+						else
+							letter++;
+					}
+
+					while (letter>termwid)
+					{
+						letter=letter-termwid;
+						l++;
+					}
+
+					stringwrapflag=1;
+				}
+
+				letter=0;
+
+				if (((i+l+1)>=termstr)&&(stringwrapflag==1))
+					break;
+
+				for (j=0;j<len;j++)
+				{
+					if (ptr[j]=='	')
+					{
+						for (k=0;k<settabwidthflag;k++)
+						{
+							letter++;
+
+							if ((setwrapflag==0)&&(letter==len))
+							{
+								endofstrflag=1;
+								break;
+							}
+
+							putchar(' ');
+						}
+					}
+					else
+					{
+						letter++;
+
+						if ((setwrapflag==0)&&(letter==len))
+						{
+							endofstrflag=1;
+							break;
+						}
+
+						putchar(ptr[j]);
+					}
+
+					if (endofstrflag==1)
+						break;
+				}
+
+				if ((wrapflag==1)||(endofstrflag==1))
+				{
+					putchar('\n');
+					wrapflag=0;
+				}
+			}
+
+			countofstr1=countofstr1-i;
+			printstep=printstep+i;
+
+			l=0;
+			stringwrapflag=0;
+
+			if (countofstr1<termstr1)
+			{
+				termstr1=countofstr1;
+			}
+
+			if (termstr1<=0)
+			{
+				endoffuncflag=1;
+				break;
+			}
+
+			if (endoffuncflag!=1)                                      /*ОБРАБОТЧИК ОПЕРАЦИЙ*/
+				while (1)
+				{
+					printf(">");
+					letter=getchar();
+
+					if (letter=='q')
+					{
+						endoffuncflag=1;
+
+						while (letter!='\n')
+						{
+							letter=getchar();
+							if (letter!='\n')
+								errflag=1;
+						}
+
+						if (errflag!=1)
+							break;
+					}
+					else
+					if (letter==' ')
+					{
+						while (letter!='\n')
+						{
+							letter=getchar();
+							if (letter!='\n')
+								errflag=1;
+						}
+
+						if (errflag!=1)
+							break;
+					}
+					else
+					{
+						errflag=2;
+					}
+
+					if (errflag!=0)
+					{
+						printf("===Такой операции не существует.===\n");
+						printf("===Введите операцию заново.===\n");
+						if (errflag==2)
+							while (letter!='\n')
+								letter=getchar();
+
+						errflag=0;
+						endoffuncflag=0;
+					}
+				}
+
+			if (endoffuncflag==1)
+			{
+				break;
+			}
+		}
+		ptr=NULL;
+		return;
+	}
+}
+
+int fset_wrap ()
+{
+	char set_wrap_yes[]="yes";
+	char set_wrap_no[]="no";
+
+
+	arg_separation();
+
+	if (cmpstr(comand,set_wrap_yes)==0)
+	{
+		setwrapflag=1;
+		return setwrapflag;
+	}
+	else
+	if (cmpstr(comand,set_wrap_no)==0)
+	{
+		setwrapflag=0;
+		return setwrapflag;
+	}
+	else
+	{
+		printf("===Неверный аргумент.===\n");
+		printf("===Введите команду заново.===\n");
+		printf("===Аргументом должно быть слово 'yes' или слово 'no'===\n");
+		setwrapflag=-1;
+		return setwrapflag;
+	}
+}
+
+int fset_tabwidth ()
+{
+	int i=0;
+
+
+	arg_separation();
+
+	if ((comand[0]>'9')||(comand[0]<'1')||(comand[0]=='\0'))
+	{
+		printf("===Неверный аргумент, выставлено значение по умолчанию.===\n");
+		printf("===Введите команду заново.===\n");
+		printf("===Аргументом должно быть число больше 0===\n");
+		settabwidthflag=-1;
+		return settabwidthflag;
+	}
+
+	while (comand[i]!='\0')
+	{
+		if ((comand[i]>'9')||(comand[i]<'0'))
+		{
+			printf("===Неверный аргумент, выставлено значение по умолчанию.===\n");
+			printf("===Введите команду заново.===\n");
+			printf("===Аргументом должно быть число больше 0===\n");
+			settabwidthflag=-1;
+			return settabwidthflag;
+		}
+		i++;
+	}
+
+	settabwidthflag=atoi(comand);
+
+	return settabwidthflag;
+}
+
+void arg_separation ()
+{
+	int i=0,j=0;
+
+	i=comandrest;
+	while (comand[i]!='\0')
+	{
+		comand[j]=comand[i];
+		j++;
+		i++;
+	}	
+	comand[j]='\0';
+
+
+	i=0;
+	while (comand[i]!='\0')
+	{
+		if (comand[i]=='#')
+		{
+			comand[i]='\0';
+			break;
+		}
+		i++;
+	}
+
+	if (comand[0]!='\0')
+	{
+		j=1;
+		while (comand[j-1]!='\0')
+		{
+			comand[j-1]=comand[j];
+			j++;
+		}
+	}
+
+	if (comand[0]!='\0')
+	{
+		j=j-2;
+		if (comand[j-1]==' ')
+			while (comand[j-1]!='\0')
+			{
+				comand[j-1]=comand[j];
+				j++;
+			}
+	}
+
+	return;
+}
+
+void comand_analize (stringoffile *arrofstr)
+{
+	int letter=0,i=-1,j=0,k=0,spaceflag=0,errflag=0,endoffuncflag=0,comandlen=0,freeflag=0;
+
+	stringoffile *arrofstr1=NULL;
+	
+	char print_pages[]="print pages";
+	char print_range[]="print range";
+	char set_tabwidth[]="set tabwidth";
+	char set_wrap[]="set wrap";
+	char insert_after[]="insert after";
+	char edit_string[]="edit string";
+	char insert_symbol[]="insert symbol";
+	char replace_substring[]="replace substring";                          /*МАССИВЫ КОМАНД*/
+	char delete_range[]="delete range";
+	char delete_braces[]="delete braces";
+	char exitminivim[]="exit";
+	char openfilewosave[]="read";
+	char openfilewsave[]="open";
+	char filesave[]="write";
+	char set_name[]="set name";
+	char help[]="help";
+
+
+	while (1)
+	{
+			if (exitflag==1)
+				return;
+
+			if ((endoffuncflag==1)&&(freeflag==0))
+			{
+				free(comand);
+				comand=NULL;
+			}
+
+			spaceflag=0;
+			errflag=0;
+			letter=0;
+			for (i=0;i<COMANDLEN+2;i++)
+				comand_buf[i]=0;
+			i=-1;
+			j=0;
+			endoffuncflag=0;
+			comandreadflag=0;
+			freeflag=0;
+
+		printf(">Введите команду.\n");                                     /*ЧТЕНИЕ КОМАНДЫ*/
+		printf(">");
+
+		letter=(int)getchar();	
+		while ((letter==' ')||(letter=='	'))
+		{
+			letter=(int)getchar();
+		}
+	
+		while (letter!='\n')
+		{
+			if (((letter==' ')||(letter=='	'))&&(spaceflag==0))
+			{
+				i++;
+				comand=(char *)realloc(comand,(i+1)*sizeof(char));
+				comand[i]=' ';
+				spaceflag=1;
+			}
+			else
+			if ((letter!=' ')&&(letter!='	'))
+			{
+				i++;
+				comand=(char *)realloc(comand,(i+1)*sizeof(char));
+				comand[i]=letter;
+				spaceflag=0;
+			}
+
+			letter=(int)getchar();		
+		}
+
+		i++;
+		comand=(char *)realloc(comand,(i+1)*sizeof(char));
+		comand[i]='\0';
+		comandlen=i;
+		i=0;
+
+		for (j=0;j<2;j++)
+		{
+			if (endoffuncflag==1)
+			{
+				free(comand);
+				comand=NULL;
+				freeflag=1;
+				break;
+			}
+
+			if (spaceflag==2)
+			{
+				free(comand);
+				comand=NULL;
+				freeflag=1;
+				errflag=1;
+			}
+
+			if (j==1)
+			{
+				comandreadflag=1;
+				if (spaceflag==1)
+				{
+					comand_buf[i]=' ';
+					i++;
+					if (i>COMANDLEN)
+					{
+						errflag=1;
+						break;
+					}
+				}
+			}
+
+			if ((errflag!=1)||(spaceflag!=2))
+			{	
+				if (comand[0]=='\0')
+				{
+					comand_buf[0]='\0';
+					spaceflag=2;
+					break;
+				}
+				else
+				while ((comand[i]!=' '))
+				{
+					comand_buf[i]=comand[i];
+					i++;
+
+					if (comand[i]=='\0')
+					{
+						comand_buf[i]='\0';
+						spaceflag=2;
+						break;
+					}
+					else
+					if (comand[i]==' ')
+					{
+						comand_buf[i]='\0';
+						spaceflag=1;
+					}
+
+					if (i>COMANDLEN)
+					{
+						errflag=1;
+						break;
+					}
+				}
+			}
+
+			if (errflag==1)
+			{
+				printf("===Такой команды не существует.===\n");
+				printf("===Введите команду заново.===\n");
+				break;
+			}
+			else
+			if (errflag!=1)
+			{
+				if (cmpstr(comand_buf,print_pages)==0)                     /*АНАЛИЗАТОР КОМАНД*/
+				{
+					comandrest=i;
+					fprint_pages(arrofstr);
+					endoffuncflag=1;                                       /*++++++++++++++++++++++++++++*/
+				}
+				else
+				if (cmpstr(comand_buf,print_range)==0)
+				{
+					comandrest=i;
+					fprint_range(arrofstr);
+					endoffuncflag=1;                                       /*++++++++++++++++++++++++++++*/     
+				}
+				else
+				if (cmpstr(comand_buf,set_tabwidth)==0)
+				{
+					comandrest=i;
+					fset_tabwidth();
+
+					if (settabwidthflag==-1)
+					{
+						settabwidthflag=8;
+					}
+
+					endoffuncflag=1;                                       /*++++++++++++++++++++++++++++*/
+				}
+				else
+				if (cmpstr(comand_buf,set_wrap)==0)
+				{
+					comandrest=i;
+					fset_wrap();
+
+					if (setwrapflag==-1)
+					{
+						setwrapflag=1;
+					}
+
+					endoffuncflag=1;                                       /*++++++++++++++++++++++++++++*/
+				}
+				else
+				if (cmpstr(comand_buf,insert_after)==0)
+				{
+					comandrest=i;
+					arrofstr=finsert_after(arrofstr);
+					endoffuncflag=1;
+				}
+				else
+				if (cmpstr(comand_buf,edit_string)==0)
+				{
+					comandrest=i;
+					arrofstr=fedit_string(arrofstr);
+					endoffuncflag=1;                                       /*++++++++++++++++++++++++++++*/
+				}
+				else
+				if (cmpstr(comand_buf,insert_symbol)==0)
+				{
+					comandrest=i;
+					arrofstr=finsert_symbol(arrofstr);
+					endoffuncflag=1;                                       /*++++++++++++++++++++++++++++*/
+				}
+				else
+				if (cmpstr(comand_buf,replace_substring)==0)
+				{
+					comandrest=i;
+					printf("===replace_substring===\n");
+					endoffuncflag=1;
+				}
+				else
+				if (cmpstr(comand_buf,delete_range)==0)
+				{
+					comandrest=i;
+					arrofstr=fdelete_range(arrofstr);
+					endoffuncflag=1;                                       /*++++++++++++++++++++++++++++*/
+				}
+				else
+				if (cmpstr(comand_buf,delete_braces)==0)
+				{
+					comandrest=i;
+					arrofstr=fdelete_braces(arrofstr);
+					endoffuncflag=1;                                       /*++++++++++++++++++++++++++++*/
+				}
+				else
+				if (cmpstr(comand_buf,exitminivim)==0)
+				{
+					comandrest=i;
+					fexit(arrofstr);
+
+					if (exitflag==1)
+						break;
+
+					endoffuncflag=1;                                       /*++++++++++++++++++++++++++++*/
+				}
+				else
+				if (cmpstr(comand_buf,openfilewosave)==0)
+				{
+					comandrest=i;
+
+					if ((arrofstr1=freadfile(arrofstr))!=NULL)
+						{
+							arrofstr=arrofstr1;
+							arrofstr1=NULL;
+						}
+
+					endoffuncflag=1;                                       /*++++++++++++++++++++++++++++*/
+				}
+				else
+				if (cmpstr(comand_buf,openfilewsave)==0)
+				{
+					comandrest=i;
+
+					if ((arrofstr1=fopenfile(arrofstr))!=NULL)
+						{
+							arrofstr=arrofstr1;
+							arrofstr1=NULL;
+						}
+
+					endoffuncflag=1;                                       /*++++++++++++++++++++++++++++*/
+				}
+				else
+				if (cmpstr(comand_buf,filesave)==0)
+				{
+					comandrest=i;
+					ffilesave(arrofstr);
+					endoffuncflag=1;                                       /*++++++++++++++++++++++++++++*/
+				}
+				else
+				if (cmpstr(comand_buf,set_name)==0)
+				{
+					comandrest=i;
+					fset_name();
+					endoffuncflag=1;                                       /*++++++++++++++++++++++++++++*/
+				}
+				else
+				if (cmpstr(comand_buf,help)==0)
+				{
+					comandrest=i;
+					fhelp();
+					endoffuncflag=1;                                       /*++++++++++++++++++++++++++++*/
+				}
+				else
+				if ((comandreadflag==1)&&(endoffuncflag==0))
+				{
+					printf("===Такой команды не существует.===\n");
+					printf("===Введите команду заново.===\n");
+				}
+			}
+		}
+	}
+}
+
+int cmpstr (char *str1, char *str2)
+{
+	int eos=0;
+
+
+	while (str1[eos]!='\0')
+	{
+		if (str1[eos]!=str2[eos])
+			return 1;
+		else
+		eos++;
+	}
+	if (str2[eos]=='\0')
+		return 0;
+}
+
+stringoffile *file_toram (FILE *f)
+{
+	stringoffile *arrofstr=NULL,*arrofstr2=NULL;
+	stringoffile str2;
+	char *ptr=NULL;
+
+
+	while (1)                                                     //СОЗДАНИЕ МАССИВА СТРУКТУР
+	{
+		ptr=toram(f);
+		if (endflag==1)
+		{
+			free(ptr);
+			ptr=NULL;
+			break;
+		}
+		else
+		{
+			str2.str=ptr;
+			str2.stringlenght=charnum;
+
+			countofstr++;
+
+			arrofstr2=(stringoffile *)realloc(arrofstr,countofstr*sizeof(stringoffile));
+			if (arrofstr2==NULL)
+			{
+				free(arrofstr2);
+				return arrofstr2;
+			}
+			else
+			{
+				arrofstr=arrofstr2;
+				arrofstr2=NULL;
+			}
+
+			arrofstr[countofstr-1].str=str2.str;
+			arrofstr[countofstr-1].stringlenght=str2.stringlenght;
+		}
+	}
+	return arrofstr;
+}
+
+char *toram (FILE *f)
+{
+	charnum=0;
+	int stepram=1;
+	int letter=' '; 
+	char *ptr=NULL,*rptr=NULL;
+
+
+	endflag=0;
+	ptr=(char *)malloc(STRLEN*sizeof(char));
+	if (ptr==NULL)
+	{
+		return ptr;
+	}
+	
+	while (letter!='\n')
+	{
+		letter=(char)fgetc(f); 
+
+		if (feof(f))
+		{
+			endflag=1;
+			break;
+		}
+
+		ptr[charnum]=(char)letter;
+		charnum++;
+		
+		if (charnum>stepram*STRLEN)
+		{
+			stepram++;
+			rptr=(char *)realloc(ptr,stepram*STRLEN*sizeof(char));
+			if (rptr==NULL)
+			{
+				free(rptr);
+				rptr=NULL;
+				return rptr;
+			}
+			else
+			{
+				ptr=rptr;
+				rptr=NULL;
+			}
+		}	
+	}
+	return ptr;
+}

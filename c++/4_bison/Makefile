@@ -1,0 +1,16 @@
+CXX=g++
+CXXFLAGS= -g -O0
+
+OBJS=$(patsubst %.cpp, %.o,  $(wildcard *.cpp))
+
+all: bison
+
+bison: $(OBJS)
+	$(CXX) $(CXXFLAGS) -o $@ $^
+
+%.o : %.cpp %.h
+	$(CXX) $(CXXFLAGS) -c $<
+
+clean:
+	rm $(OBJS) bison
+

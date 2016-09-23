@@ -1,0 +1,30 @@
+%{
+#include <cstdio>
+%}
+
+%token NUM;
+
+%%
+input:
+| input line
+;
+
+line:
+'\n'
+| exp '\n' /*qwerqwer*/
+;
+
+exp:
+NUM
+| exp exp '+' {qwerqwer}
+| exp exp '-' {qweqr}
+| exp exp '*' {qweqr}
+| exp exp '/' {qweqr}
+/*qwerqer*/
+| exp exp '^' {qweqr}
+/*rtyguhjk*/
+| exp exp 'n' {qweqr}
+;
+
+
+%%

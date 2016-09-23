@@ -1,0 +1,137 @@
+void execute (job_struct job)
+{
+	int lfd[2], rfd[2], fd = 0, i = 0; 
+
+
+
+
+	for (i = 0; i < job.number_of_programs; i++)
+	{
+		if (job.number_of_programs != 1)
+			pipe(rfd);
+
+		switch (fork())
+		{
+			case -1:
+			{
+				perror("fork");
+				return;
+			}
+
+			case 0:
+			{
+				char **tmpprog = NULL;
+
+				if (job.number_of_programs == 1)
+				{
+					if (job.background == 1)
+						printf("Process with ID (%d) launched\n",getpid());
+
+					fd = redirection(job.conv[i]);
+
+					if (fd == -1)  
+					{
+						in_command = NULL;
+						free_all();
+						free(current_dir);
+						exit(-1);
+					}
+				}
+				else
+				{
+					if (job.background == 1)
+						printf("Process with ID (%d) launched\n",getpid());
+
+					if (i == 0)
+					{
+						dup2(rfd[1], 1);
+						close(rfd[0]);
+						close(rfd[1]);
+
+						fd = redirection(job.conv[i]);
+
+						if (fd == -1)  
+						{
+							in_command = NULL;
+							free_all();
+							free(current_dir);
+							exit(-1);
+						}
+					}
+					else
+					if (i != job.number_of_programs-1)
+					{
+						dup2(lfd[0], 0);
+						dup2(rfd[1], 1);
+
+						close(rfd[0]);
+						close(rfd[1]);
+
+						close(lfd[0]);
+						close(lfd[1]);
+					}
+					else
+					if (i == job.number_of_programs-1)
+					{
+						dup2(lfd[0], 0);
+
+						fd = redirection(job.conv[i]);
+
+						if (fd == -1)  
+						{
+							in_command = NULL;
+							free_all();
+							free(current_dir);
+							exit(-1);
+						}
+
+						close(rfd[0]);
+						close(rfd[1]);
+
+						close(lfd[0]);
+						close(lfd[1]);
+					}
+				}
+
+				tmpprog = delete_redirection_signs(job.conv[i]);
+
+				signal(SIGINT, SIG_DFL);
+				signal(SIGTSTP, SIG_DFL);
+
+				execvp(tmpprog[0], tmpprog);
+				perror("exec");
+
+				in_command = NULL;
+				free(tmpprog);
+				tmpprog = NULL;
+				free_all();
+				free(current_dir);
+				exit(-1);
+			}
+
+			default:
+			{
+				if (i > 0)
+				{
+					close(lfd[0]);
+					close(lfd[1]);
+				}
+
+				if (job.number_of_programs != 1)
+				{
+					lfd[0] = rfd[0];
+					lfd[1] = rfd[1];
+				}
+
+				if (job.background == 0)
+					wait(&shellprogram.prog_status);
+
+				/*if ((job.background == 1) && (WEXITSTATUS(&shellprogram.prog_status) != 0))
+					break;*/
+			}
+		}
+	}
+
+	return;
+}
+

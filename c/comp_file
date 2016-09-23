@@ -1,0 +1,1 @@
+if gcc -g -O0 prog.c -o PROG.out; then valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes --db-attach=yes /*--vgdb-error=1*/ ./PROG.out + ARGS; fi
